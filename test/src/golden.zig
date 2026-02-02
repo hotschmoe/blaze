@@ -1,12 +1,10 @@
 //! BLAZE Conformance Test Suite - Golden Image Testing
 //!
-//! Provides utilities for golden image comparison, including loading,
-//! saving, and comparing rendered output against reference images.
+//! Utilities for golden image comparison, loading, saving, and
+//! comparing rendered output against reference images.
 
 const std = @import("std");
-const framework = @import("framework.zig");
 
-/// RGBA pixel format for image data.
 pub const Pixel = struct {
     r: u8,
     g: u8,
@@ -26,13 +24,10 @@ pub const Pixel = struct {
         slice[0] = self.r;
         slice[1] = self.g;
         slice[2] = self.b;
-        if (slice.len > 3) {
-            slice[3] = self.a;
-        }
+        if (slice.len > 3) slice[3] = self.a;
     }
 };
 
-/// Image data container.
 pub const Image = struct {
     width: u32,
     height: u32,
@@ -41,11 +36,10 @@ pub const Image = struct {
 
     pub fn init(allocator: std.mem.Allocator, width: u32, height: u32) !Image {
         const size = @as(usize, width) * @as(usize, height) * 4;
-        const data = try allocator.alloc(u8, size);
         return .{
             .width = width,
             .height = height,
-            .data = data,
+            .data = try allocator.alloc(u8, size),
             .allocator = allocator,
         };
     }
@@ -55,46 +49,32 @@ pub const Image = struct {
         self.* = undefined;
     }
 
+    fn pixelOffset(self: Image, x: u32, y: u32) usize {
+        return (@as(usize, y) * @as(usize, self.width) + @as(usize, x)) * 4;
+    }
+
     pub fn getPixel(self: Image, x: u32, y: u32) Pixel {
-        const offset = (@as(usize, y) * @as(usize, self.width) + @as(usize, x)) * 4;
-        return Pixel.fromSlice(self.data[offset..][0..4]);
+        return Pixel.fromSlice(self.data[self.pixelOffset(x, y)..][0..4]);
     }
 
     pub fn setPixel(self: *Image, x: u32, y: u32, pixel: Pixel) void {
-        const offset = (@as(usize, y) * @as(usize, self.width) + @as(usize, x)) * 4;
-        pixel.toSlice(self.data[offset..][0..4]);
+        pixel.toSlice(self.data[self.pixelOffset(x, y)..][0..4]);
     }
 };
 
-/// Options for image comparison.
 pub const ImageCompareOptions = struct {
-    /// Per-pixel color tolerance (0-255 per channel).
     color_tolerance: u8 = 2,
-
-    /// Maximum percentage of pixels allowed to differ.
     max_diff_percent: f32 = 0.1,
-
-    /// Enable perceptual comparison (LAB color space).
     perceptual: bool = true,
-
-    /// Ignore anti-aliasing edge pixels.
     ignore_aa: bool = true,
-
-    /// Vendor-specific golden image suffix (e.g., "nvidia", "amd").
     vendor_suffix: ?[]const u8 = null,
 };
 
-/// Result of image comparison.
 pub const ImageCompareResult = struct {
-    /// Whether the images match within tolerance.
     match: bool,
-    /// Percentage of differing pixels.
     diff_percent: f32,
-    /// Total number of differing pixels.
     diff_count: u32,
-    /// Maximum color difference found.
     max_diff: u32,
-    /// Reason for mismatch (if any).
     reason: ?MismatchReason = null,
 
     pub const MismatchReason = enum {
@@ -102,19 +82,9 @@ pub const ImageCompareResult = struct {
         color_tolerance_exceeded,
         diff_percent_exceeded,
     };
-
-    pub fn isMatch(self: ImageCompareResult) bool {
-        return self.match;
-    }
 };
 
-/// Compares two images and returns the comparison result.
-pub fn compareImages(
-    actual: Image,
-    expected: Image,
-    options: ImageCompareOptions,
-) ImageCompareResult {
-    // Check dimensions first
+pub fn compareImages(actual: Image, expected: Image, options: ImageCompareOptions) ImageCompareResult {
     if (actual.width != expected.width or actual.height != expected.height) {
         return .{
             .match = false,
@@ -128,12 +98,10 @@ pub fn compareImages(
     var diff_count: u32 = 0;
     var max_diff: u32 = 0;
 
-    var y: u32 = 0;
-    while (y < actual.height) : (y += 1) {
-        var x: u32 = 0;
-        while (x < actual.width) : (x += 1) {
-            const actual_pixel = actual.getPixel(x, y);
-            const expected_pixel = expected.getPixel(x, y);
+    for (0..actual.height) |y| {
+        for (0..actual.width) |x| {
+            const actual_pixel = actual.getPixel(@intCast(x), @intCast(y));
+            const expected_pixel = expected.getPixel(@intCast(x), @intCast(y));
 
             const diff = if (options.perceptual)
                 perceptualDiff(actual_pixel, expected_pixel)
@@ -141,9 +109,7 @@ pub fn compareImages(
                 colorDiff(actual_pixel, expected_pixel);
 
             if (diff > options.color_tolerance) {
-                if (options.ignore_aa and isEdgePixel(expected, x, y)) {
-                    continue;
-                }
+                if (options.ignore_aa and isEdgePixel(expected, @intCast(x), @intCast(y))) continue;
                 diff_count += 1;
                 max_diff = @max(max_diff, diff);
             }
@@ -157,7 +123,6 @@ pub fn compareImages(
         0.0;
 
     const match = diff_percent <= options.max_diff_percent;
-
     return .{
         .match = match,
         .diff_percent = diff_percent,
@@ -167,16 +132,13 @@ pub fn compareImages(
     };
 }
 
-/// Calculates simple color difference between two pixels.
 fn colorDiff(a: Pixel, b: Pixel) u32 {
-    const dr = absDiff(a.r, b.r);
-    const dg = absDiff(a.g, b.g);
-    const db = absDiff(a.b, b.b);
-    const da = absDiff(a.a, b.a);
-    return @as(u32, dr) + @as(u32, dg) + @as(u32, db) + @as(u32, da);
+    return @as(u32, absDiff(a.r, b.r)) +
+        @as(u32, absDiff(a.g, b.g)) +
+        @as(u32, absDiff(a.b, b.b)) +
+        @as(u32, absDiff(a.a, b.a));
 }
 
-/// Calculates perceptual color difference (simplified LAB approximation).
 fn perceptualDiff(a: Pixel, b: Pixel) u32 {
     // Simplified perceptual difference using weighted RGB
     // Human eye is more sensitive to green, less to blue
@@ -184,17 +146,12 @@ fn perceptualDiff(a: Pixel, b: Pixel) u32 {
     const dg = @as(i32, a.g) - @as(i32, b.g);
     const db = @as(i32, a.b) - @as(i32, b.b);
 
-    // Weighted sum approximating perceptual difference
     const weighted = (dr * dr * 2 + dg * dg * 4 + db * db * 3) / 9;
-    const sqrt_val = std.math.sqrt(@as(f32, @floatFromInt(@max(0, weighted))));
-    return @intFromFloat(sqrt_val);
+    return @intFromFloat(std.math.sqrt(@as(f32, @floatFromInt(@max(0, weighted)))));
 }
 
-/// Checks if a pixel is on an edge (for anti-aliasing detection).
 fn isEdgePixel(image: Image, x: u32, y: u32) bool {
     const center = image.getPixel(x, y);
-
-    // Check 4-connected neighbors
     const neighbors = [_]?Pixel{
         if (x > 0) image.getPixel(x - 1, y) else null,
         if (x < image.width - 1) image.getPixel(x + 1, y) else null,
@@ -202,49 +159,33 @@ fn isEdgePixel(image: Image, x: u32, y: u32) bool {
         if (y < image.height - 1) image.getPixel(x, y + 1) else null,
     };
 
-    // If any neighbor differs significantly, it's an edge
     for (neighbors) |maybe_neighbor| {
         if (maybe_neighbor) |neighbor| {
-            if (colorDiff(center, neighbor) > 30) {
-                return true;
-            }
+            if (colorDiff(center, neighbor) > 30) return true;
         }
     }
-
     return false;
 }
 
-/// Helper function for absolute difference.
 fn absDiff(a: u8, b: u8) u8 {
     return if (a > b) a - b else b - a;
 }
 
-// ============================================================================
-// Image I/O (Stubs)
-// ============================================================================
+// Image I/O (stubs for future implementation)
 
-/// Loads an image from a PNG file.
 pub fn loadPng(allocator: std.mem.Allocator, path: []const u8) !Image {
     _ = allocator;
     _ = path;
-    // TODO: Implement PNG loading (using stb_image or similar)
     return error.NotImplemented;
 }
 
-/// Saves an image to a PNG file.
 pub fn savePng(image: Image, path: []const u8) !void {
     _ = image;
     _ = path;
-    // TODO: Implement PNG saving (using stb_image_write or similar)
     return error.NotImplemented;
 }
 
-/// Generates a diff image highlighting differences between two images.
-pub fn generateDiffImage(
-    allocator: std.mem.Allocator,
-    actual: Image,
-    expected: Image,
-) !Image {
+pub fn generateDiffImage(allocator: std.mem.Allocator, actual: Image, expected: Image) !Image {
     if (actual.width != expected.width or actual.height != expected.height) {
         return error.InvalidArgument;
     }
@@ -252,20 +193,17 @@ pub fn generateDiffImage(
     var diff = try Image.init(allocator, actual.width, actual.height);
     errdefer diff.deinit();
 
-    var y: u32 = 0;
-    while (y < actual.height) : (y += 1) {
-        var x: u32 = 0;
-        while (x < actual.width) : (x += 1) {
-            const actual_pixel = actual.getPixel(x, y);
-            const expected_pixel = expected.getPixel(x, y);
-            const pixel_diff = colorDiff(actual_pixel, expected_pixel);
+    for (0..actual.height) |y| {
+        for (0..actual.width) |x| {
+            const ax: u32 = @intCast(x);
+            const ay: u32 = @intCast(y);
+            const actual_pixel = actual.getPixel(ax, ay);
+            const expected_pixel = expected.getPixel(ax, ay);
 
-            if (pixel_diff > 2) {
-                // Highlight differences in red
-                diff.setPixel(x, y, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
+            if (colorDiff(actual_pixel, expected_pixel) > 2) {
+                diff.setPixel(ax, ay, .{ .r = 255, .g = 0, .b = 0, .a = 255 });
             } else {
-                // Show original with reduced opacity
-                diff.setPixel(x, y, .{
+                diff.setPixel(ax, ay, .{
                     .r = actual_pixel.r / 2,
                     .g = actual_pixel.g / 2,
                     .b = actual_pixel.b / 2,
@@ -278,46 +216,22 @@ pub fn generateDiffImage(
     return diff;
 }
 
-// ============================================================================
 // Golden Image Management
-// ============================================================================
 
-/// Default path for golden images.
 pub const GOLDEN_DIR = "test/golden";
-
-/// Default path for diff images.
 pub const DIFFS_DIR = "test/diffs";
 
-/// Gets the path for a golden image.
-pub fn getGoldenPath(
-    allocator: std.mem.Allocator,
-    category: []const u8,
-    test_name: []const u8,
-    vendor_suffix: ?[]const u8,
-) ![]u8 {
-    if (vendor_suffix) |suffix| {
-        return std.fmt.allocPrint(allocator, "{s}/{s}/{s}_{s}.png", .{
-            GOLDEN_DIR, category, test_name, suffix,
-        });
-    } else {
-        return std.fmt.allocPrint(allocator, "{s}/{s}/{s}.png", .{
-            GOLDEN_DIR, category, test_name,
-        });
-    }
+pub fn getGoldenPath(allocator: std.mem.Allocator, category: []const u8, test_name: []const u8, vendor_suffix: ?[]const u8) ![]u8 {
+    return if (vendor_suffix) |suffix|
+        std.fmt.allocPrint(allocator, "{s}/{s}/{s}_{s}.png", .{ GOLDEN_DIR, category, test_name, suffix })
+    else
+        std.fmt.allocPrint(allocator, "{s}/{s}/{s}.png", .{ GOLDEN_DIR, category, test_name });
 }
 
-/// Gets the path for a diff image.
-pub fn getDiffPath(
-    allocator: std.mem.Allocator,
-    category: []const u8,
-    test_name: []const u8,
-) ![]u8 {
-    return std.fmt.allocPrint(allocator, "{s}/{s}_{s}_diff.png", .{
-        DIFFS_DIR, category, test_name,
-    });
+pub fn getDiffPath(allocator: std.mem.Allocator, category: []const u8, test_name: []const u8) ![]u8 {
+    return std.fmt.allocPrint(allocator, "{s}/{s}_{s}_diff.png", .{ DIFFS_DIR, category, test_name });
 }
 
-/// Error type for golden image operations.
 pub const GoldenError = error{
     NotImplemented,
     InvalidArgument,
@@ -327,9 +241,6 @@ pub const GoldenError = error{
     ComparisonFailed,
 };
 
-const Error = GoldenError || std.mem.Allocator.Error;
-
-/// Compares actual output to golden image and optionally saves diff.
 pub fn verifyAgainstGolden(
     allocator: std.mem.Allocator,
     actual: Image,
@@ -337,25 +248,12 @@ pub fn verifyAgainstGolden(
     test_name: []const u8,
     options: ImageCompareOptions,
     save_diff: bool,
-) Error!ImageCompareResult {
-    _ = allocator;
-    _ = actual;
-    _ = category;
-    _ = test_name;
-    _ = options;
-    _ = save_diff;
-    // TODO: Implement full golden image verification
+) (GoldenError || std.mem.Allocator.Error)!ImageCompareResult {
+    _ = .{ allocator, actual, category, test_name, options, save_diff };
     return error.NotImplemented;
 }
 
-/// Saves current output as the new golden image.
-pub fn updateGolden(
-    allocator: std.mem.Allocator,
-    actual: Image,
-    category: []const u8,
-    test_name: []const u8,
-    vendor_suffix: ?[]const u8,
-) !void {
+pub fn updateGolden(allocator: std.mem.Allocator, actual: Image, category: []const u8, test_name: []const u8, vendor_suffix: ?[]const u8) !void {
     const path = try getGoldenPath(allocator, category, test_name, vendor_suffix);
     defer allocator.free(path);
     try savePng(actual, path);

@@ -5,9 +5,7 @@
 
 const std = @import("std");
 const framework = @import("framework.zig");
-const golden = @import("golden.zig");
 
-// Import all test suites
 const context_tests = @import("context/tests.zig");
 const buffer_tests = @import("buffer/tests.zig");
 const texture_tests = @import("texture/tests.zig");
@@ -19,38 +17,24 @@ const sync_tests = @import("sync/tests.zig");
 const compute_tests = @import("compute/tests.zig");
 const render_tests = @import("render/tests.zig");
 
-/// Configuration options for the test runner.
 pub const RunnerConfig = struct {
-    /// Filter string for selecting specific tests.
     filter: ?[]const u8 = null,
-    /// Generate golden images instead of comparing.
     generate_golden: bool = false,
-    /// Save diff images on comparison failure.
     save_diffs: bool = false,
-    /// Output JUnit XML results to this path.
     junit_output: ?[]const u8 = null,
-    /// Output JSON results to this path.
     json_output: ?[]const u8 = null,
-    /// Only run tests of this priority or higher.
     min_priority: framework.Priority = .p2,
-    /// Verbose output mode.
     verbose: bool = false,
-    /// Continue running tests after failure.
     keep_going: bool = true,
-    /// Number of times to run each test (for flaky test detection).
     iterations: u32 = 1,
 };
 
-/// Test runner that executes all conformance test suites.
 pub const TestRunner = struct {
     allocator: std.mem.Allocator,
     config: RunnerConfig,
-    results: std.ArrayList(framework.TestResult),
+    results: std.ArrayListUnmanaged(framework.TestResult),
     start_time: i64,
 
-    const Self = @This();
-
-    /// All registered test suites.
     const all_suites = [_]framework.TestSuite{
         context_tests.suite,
         buffer_tests.suite,
@@ -64,119 +48,84 @@ pub const TestRunner = struct {
         render_tests.suite,
     };
 
-    pub fn init(allocator: std.mem.Allocator, config: RunnerConfig) Self {
+    pub fn init(allocator: std.mem.Allocator, config: RunnerConfig) TestRunner {
         return .{
             .allocator = allocator,
             .config = config,
-            .results = std.ArrayList(framework.TestResult).init(allocator),
+            .results = .{},
             .start_time = std.time.milliTimestamp(),
         };
     }
 
-    pub fn deinit(self: *Self) void {
-        self.results.deinit();
+    pub fn deinit(self: *TestRunner) void {
+        self.results.deinit(self.allocator);
     }
 
-    /// Runs all test suites and returns the number of failures.
-    pub fn run(self: *Self) !u32 {
-        self.printHeader();
+    pub fn run(self: *TestRunner) !u32 {
+        printHeader();
 
         var failures: u32 = 0;
-
         for (all_suites) |suite| {
-            if (self.shouldSkipSuite(suite)) {
-                continue;
-            }
+            if (self.shouldSkipSuite(suite)) continue;
 
             const suite_failures = try self.runSuite(suite);
             failures += suite_failures;
 
-            if (suite_failures > 0 and !self.config.keep_going) {
-                break;
-            }
+            if (suite_failures > 0 and !self.config.keep_going) break;
         }
 
         self.printSummary();
 
-        if (self.config.junit_output) |path| {
-            try self.writeJunitXml(path);
-        }
-
-        if (self.config.json_output) |path| {
-            try self.writeJsonOutput(path);
-        }
+        if (self.config.junit_output) |path| try self.writeJunitXml(path);
+        if (self.config.json_output) |path| try self.writeJsonOutput(path);
 
         return failures;
     }
 
-    fn shouldSkipSuite(self: *Self, suite: framework.TestSuite) bool {
+    fn shouldSkipSuite(self: *TestRunner, suite: framework.TestSuite) bool {
+        const filter = self.config.filter orelse return false;
+
+        if (std.mem.indexOf(u8, suite.name, filter) != null) return false;
+        for (suite.tests) |test_case| {
+            if (std.mem.indexOf(u8, test_case.name, filter) != null) return false;
+        }
+        return true;
+    }
+
+    fn shouldSkipTest(self: *TestRunner, suite: framework.TestSuite, test_case: framework.TestCase) bool {
+        if (@intFromEnum(test_case.priority) > @intFromEnum(self.config.min_priority)) return true;
+
         if (self.config.filter) |filter| {
-            // Check if filter matches suite name
-            if (std.mem.indexOf(u8, suite.name, filter) != null) {
-                return false;
-            }
-            // Check if filter matches any test name
-            for (suite.tests) |test_case| {
-                if (std.mem.indexOf(u8, test_case.name, filter) != null) {
-                    return false;
-                }
-            }
+            // Check if filter matches test name or suite.test_name pattern
+            if (std.mem.indexOf(u8, test_case.name, filter) != null) return false;
+            if (std.mem.indexOf(u8, suite.name, filter) != null) return false;
             return true;
         }
         return false;
     }
 
-    fn shouldSkipTest(self: *Self, suite: framework.TestSuite, test_case: framework.TestCase) bool {
-        // Check priority
-        if (@intFromEnum(test_case.priority) > @intFromEnum(self.config.min_priority)) {
-            return true;
-        }
-
-        // Check filter
-        if (self.config.filter) |filter| {
-            const full_name = suite.name ++ "." ++ test_case.name;
-            if (std.mem.indexOf(u8, full_name, filter) == null and
-                std.mem.indexOf(u8, test_case.name, filter) == null)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    fn runSuite(self: *Self, suite: framework.TestSuite) !u32 {
+    fn runSuite(self: *TestRunner, suite: framework.TestSuite) !u32 {
         std.debug.print("\n", .{});
-        self.printSuiteBanner(suite.name);
+        printSuiteBanner(suite.name);
 
         var failures: u32 = 0;
-
         for (suite.tests) |test_case| {
-            if (self.shouldSkipTest(suite, test_case)) {
-                continue;
-            }
+            if (self.shouldSkipTest(suite, test_case)) continue;
 
-            var i: u32 = 0;
-            while (i < self.config.iterations) : (i += 1) {
-                const result = self.runTest(suite, test_case);
-                try self.results.append(result);
-                self.printResult(result);
+            for (0..self.config.iterations) |_| {
+                const result = runTest(suite, test_case);
+                try self.results.append(self.allocator, result);
+                printResult(result);
 
-                if (result.status == .failed) {
-                    failures += 1;
-                }
+                if (result.status == .failed) failures += 1;
             }
         }
-
         return failures;
     }
 
-    fn runTest(self: *Self, suite: framework.TestSuite, test_case: framework.TestCase) framework.TestResult {
-        _ = self;
-
+    fn runTest(suite: framework.TestSuite, test_case: framework.TestCase) framework.TestResult {
         const start = std.time.nanoTimestamp();
 
-        // Run setup if present
         if (suite.setup) |setup| {
             setup() catch |err| {
                 return .{
@@ -189,153 +138,115 @@ pub const TestRunner = struct {
             };
         }
 
-        // Run the test
-        const result = if (test_case.run()) |_|
-            framework.TestResult{
+        defer if (suite.teardown) |teardown| teardown();
+
+        return if (test_case.run()) |_|
+            .{
                 .name = test_case.name,
                 .category = suite.name,
                 .status = .passed,
                 .duration_ns = @intCast(std.time.nanoTimestamp() - start),
             }
         else |err|
-            framework.TestResult{
+            .{
                 .name = test_case.name,
                 .category = suite.name,
                 .status = if (err == error.NotImplemented) .skipped else .failed,
                 .duration_ns = @intCast(std.time.nanoTimestamp() - start),
                 .message = @errorName(err),
             };
-
-        // Run teardown if present
-        if (suite.teardown) |teardown| {
-            teardown();
-        }
-
-        return result;
     }
 
-    fn printHeader(self: *Self) void {
-        _ = self;
-        std.debug.print("\n", .{});
-        std.debug.print("================================================================\n", .{});
-        std.debug.print("         BLAZE CONFORMANCE TEST SUITE (BLAZE-CTS)              \n", .{});
-        std.debug.print("================================================================\n", .{});
-        std.debug.print("\n", .{});
+    fn printHeader() void {
+        std.debug.print(
+            \\
+            \\================================================================
+            \\         BLAZE CONFORMANCE TEST SUITE (BLAZE-CTS)
+            \\================================================================
+            \\
+        , .{});
     }
 
-    fn printSuiteBanner(self: *Self, name: []const u8) void {
-        _ = self;
+    fn printSuiteBanner(name: []const u8) void {
         std.debug.print("--- {s} ", .{name});
-        // Pad with dashes to 60 chars
-        const name_len = name.len + 5; // "--- " + name + " "
-        var i: usize = name_len;
-        while (i < 60) : (i += 1) {
-            std.debug.print("-", .{});
-        }
+        for (name.len + 5..60) |_| std.debug.print("-", .{});
         std.debug.print("\n", .{});
     }
 
-    fn printResult(self: *Self, result: framework.TestResult) void {
-        _ = self;
-        const symbol = switch (result.status) {
-            .passed => "[PASS]",
-            .failed => "[FAIL]",
-            .skipped => "[SKIP]",
-            .timeout => "[TIME]",
-        };
-
-        const color = switch (result.status) {
-            .passed => "\x1b[32m",
-            .failed => "\x1b[31m",
-            .skipped => "\x1b[33m",
-            .timeout => "\x1b[33m",
+    fn printResult(result: framework.TestResult) void {
+        const symbol, const color = switch (result.status) {
+            .passed => .{ "[PASS]", "\x1b[32m" },
+            .failed => .{ "[FAIL]", "\x1b[31m" },
+            .skipped => .{ "[SKIP]", "\x1b[33m" },
+            .timeout => .{ "[TIME]", "\x1b[33m" },
         };
 
         const duration_ms = @as(f64, @floatFromInt(result.duration_ns)) / 1_000_000.0;
-
         std.debug.print("  {s}{s}\x1b[0m {s}", .{ color, symbol, result.name });
-
-        if (result.message) |msg| {
-            std.debug.print(" - {s}", .{msg});
-        }
-
+        if (result.message) |msg| std.debug.print(" - {s}", .{msg});
         std.debug.print(" ({d:.2}ms)\n", .{duration_ms});
     }
 
-    fn printSummary(self: *Self) void {
-        var passed: u32 = 0;
-        var failed: u32 = 0;
-        var skipped: u32 = 0;
-        var timeout: u32 = 0;
+    fn printSummary(self: *TestRunner) void {
+        var counts = [4]u32{ 0, 0, 0, 0 };
+        for (self.results.items) |r| counts[@intFromEnum(r.status)] += 1;
 
-        for (self.results.items) |r| {
-            switch (r.status) {
-                .passed => passed += 1,
-                .failed => failed += 1,
-                .skipped => skipped += 1,
-                .timeout => timeout += 1,
-            }
-        }
-
+        const passed, const failed, const skipped, const timeout = .{ counts[0], counts[1], counts[2], counts[3] };
         const total = passed + failed + skipped + timeout;
         const elapsed = std.time.milliTimestamp() - self.start_time;
 
-        std.debug.print("\n", .{});
-        std.debug.print("================================================================\n", .{});
-        std.debug.print("                    CONFORMANCE RESULTS                         \n", .{});
-        std.debug.print("================================================================\n", .{});
-        std.debug.print("  Passed:  \x1b[32m{d}\x1b[0m\n", .{passed});
-        std.debug.print("  Failed:  \x1b[31m{d}\x1b[0m\n", .{failed});
-        std.debug.print("  Skipped: \x1b[33m{d}\x1b[0m\n", .{skipped});
-        if (timeout > 0) {
-            std.debug.print("  Timeout: \x1b[33m{d}\x1b[0m\n", .{timeout});
-        }
-        std.debug.print("  Total:   {d}\n", .{total});
-        std.debug.print("  Time:    {d}ms\n", .{elapsed});
-        std.debug.print("================================================================\n", .{});
+        std.debug.print(
+            \\
+            \\================================================================
+            \\                    CONFORMANCE RESULTS
+            \\================================================================
+            \\  Passed:  {[green]s}{[passed]d}{[reset]s}
+            \\  Failed:  {[red]s}{[failed]d}{[reset]s}
+            \\  Skipped: {[yellow]s}{[skipped]d}{[reset]s}
+        , .{
+            .green = "\x1b[32m",
+            .red = "\x1b[31m",
+            .yellow = "\x1b[33m",
+            .reset = "\x1b[0m",
+            .passed = passed,
+            .failed = failed,
+            .skipped = skipped,
+        });
+
+        if (timeout > 0) std.debug.print("  Timeout: \x1b[33m{d}\x1b[0m\n", .{timeout});
+        std.debug.print("  Total:   {d}\n  Time:    {d}ms\n================================================================\n", .{ total, elapsed });
 
         if (failed > 0) {
             std.debug.print("\n\x1b[31mFailed tests:\x1b[0m\n", .{});
             for (self.results.items) |r| {
                 if (r.status == .failed) {
                     std.debug.print("  - {s}.{s}", .{ r.category, r.name });
-                    if (r.message) |msg| {
-                        std.debug.print(": {s}", .{msg});
-                    }
+                    if (r.message) |msg| std.debug.print(": {s}", .{msg});
                     std.debug.print("\n", .{});
                 }
             }
         }
 
-        const status = if (failed == 0) "\x1b[32mPASSED\x1b[0m" else "\x1b[31mFAILED\x1b[0m";
-        std.debug.print("\nOverall: {s}\n", .{status});
+        std.debug.print("\nOverall: {s}\n", .{if (failed == 0) "\x1b[32mPASSED\x1b[0m" else "\x1b[31mFAILED\x1b[0m"});
     }
 
-    fn writeJunitXml(self: *Self, path: []const u8) !void {
+    fn writeJunitXml(self: *TestRunner, path: []const u8) !void {
         const file = try std.fs.cwd().createFile(path, .{});
         defer file.close();
 
-        var writer = file.writer();
+        try file.writeAll("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n");
 
-        try writer.writeAll("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-        try writer.writeAll("<testsuites>\n");
-
-        // Group by category
-        var categories = std.StringHashMap(std.ArrayList(framework.TestResult)).init(self.allocator);
+        var categories = std.StringHashMapUnmanaged(std.ArrayListUnmanaged(framework.TestResult)){};
         defer {
             var iter = categories.valueIterator();
-            while (iter.next()) |list| {
-                list.deinit();
-            }
-            categories.deinit();
+            while (iter.next()) |list| list.deinit(self.allocator);
+            categories.deinit(self.allocator);
         }
 
         for (self.results.items) |result| {
-            const gop = try categories.getOrPut(result.category);
-            if (!gop.found_existing) {
-                gop.value_ptr.* = std.ArrayList(framework.TestResult).init(self.allocator);
-            }
-            try gop.value_ptr.append(result);
+            const gop = try categories.getOrPut(self.allocator, result.category);
+            if (!gop.found_existing) gop.value_ptr.* = .{};
+            try gop.value_ptr.append(self.allocator, result);
         }
 
         var cat_iter = categories.iterator();
@@ -347,73 +258,68 @@ pub const TestRunner = struct {
                 suite_time += r.duration_ns;
             }
 
-            try writer.print("  <testsuite name=\"{s}\" tests=\"{d}\" failures=\"{d}\" time=\"{d:.3}\">\n", .{
-                entry.key_ptr.*,
-                entry.value_ptr.items.len,
-                suite_failures,
-                @as(f64, @floatFromInt(suite_time)) / 1_000_000_000.0,
+            const suite_header = try std.fmt.allocPrint(self.allocator, "  <testsuite name=\"{s}\" tests=\"{d}\" failures=\"{d}\" time=\"{d:.3}\">\n", .{
+                entry.key_ptr.*, entry.value_ptr.items.len, suite_failures, @as(f64, @floatFromInt(suite_time)) / 1e9,
             });
+            defer self.allocator.free(suite_header);
+            try file.writeAll(suite_header);
 
             for (entry.value_ptr.items) |r| {
-                try writer.print("    <testcase name=\"{s}\" time=\"{d:.3}\"", .{
-                    r.name,
-                    @as(f64, @floatFromInt(r.duration_ns)) / 1_000_000_000.0,
+                const testcase = try std.fmt.allocPrint(self.allocator, "    <testcase name=\"{s}\" time=\"{d:.3}\"", .{
+                    r.name, @as(f64, @floatFromInt(r.duration_ns)) / 1e9,
                 });
+                defer self.allocator.free(testcase);
+                try file.writeAll(testcase);
 
-                if (r.status == .failed) {
-                    try writer.writeAll(">\n");
-                    try writer.print("      <failure message=\"{s}\"/>\n", .{r.message orelse "Unknown error"});
-                    try writer.writeAll("    </testcase>\n");
-                } else if (r.status == .skipped) {
-                    try writer.writeAll(">\n");
-                    try writer.writeAll("      <skipped/>\n");
-                    try writer.writeAll("    </testcase>\n");
-                } else {
-                    try writer.writeAll("/>\n");
+                switch (r.status) {
+                    .failed => {
+                        const fail_msg = try std.fmt.allocPrint(self.allocator, ">\n      <failure message=\"{s}\"/>\n    </testcase>\n", .{r.message orelse "Unknown error"});
+                        defer self.allocator.free(fail_msg);
+                        try file.writeAll(fail_msg);
+                    },
+                    .skipped => try file.writeAll(">\n      <skipped/>\n    </testcase>\n"),
+                    else => try file.writeAll("/>\n"),
                 }
             }
-
-            try writer.writeAll("  </testsuite>\n");
+            try file.writeAll("  </testsuite>\n");
         }
-
-        try writer.writeAll("</testsuites>\n");
+        try file.writeAll("</testsuites>\n");
     }
 
-    fn writeJsonOutput(self: *Self, path: []const u8) !void {
+    fn writeJsonOutput(self: *TestRunner, path: []const u8) !void {
         const file = try std.fs.cwd().createFile(path, .{});
         defer file.close();
 
-        var writer = file.writer();
-
-        try writer.writeAll("{\n  \"results\": [\n");
-
+        try file.writeAll("{\n  \"results\": [\n");
         for (self.results.items, 0..) |r, i| {
-            if (i > 0) try writer.writeAll(",\n");
-            try writer.print("    {{\n      \"name\": \"{s}\",\n      \"category\": \"{s}\",\n      \"status\": \"{s}\",\n      \"duration_ms\": {d:.3}", .{
-                r.name,
-                r.category,
-                @tagName(r.status),
-                @as(f64, @floatFromInt(r.duration_ns)) / 1_000_000.0,
-            });
-            if (r.message) |msg| {
-                try writer.print(",\n      \"message\": \"{s}\"", .{msg});
-            }
-            try writer.writeAll("\n    }");
-        }
+            if (i > 0) try file.writeAll(",\n");
+            const entry = try std.fmt.allocPrint(self.allocator,
+                \\    {{
+                \\      "name": "{s}",
+                \\      "category": "{s}",
+                \\      "status": "{s}",
+                \\      "duration_ms": {d:.3}
+            , .{ r.name, r.category, @tagName(r.status), @as(f64, @floatFromInt(r.duration_ns)) / 1e6 });
+            defer self.allocator.free(entry);
+            try file.writeAll(entry);
 
-        try writer.writeAll("\n  ]\n}\n");
+            if (r.message) |msg| {
+                const msg_str = try std.fmt.allocPrint(self.allocator, ",\n      \"message\": \"{s}\"", .{msg});
+                defer self.allocator.free(msg_str);
+                try file.writeAll(msg_str);
+            }
+            try file.writeAll("\n    }");
+        }
+        try file.writeAll("\n  ]\n}\n");
     }
 };
 
-/// Parses command line arguments into a RunnerConfig.
 pub fn parseArgs(allocator: std.mem.Allocator) !RunnerConfig {
     var config = RunnerConfig{};
-
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    // Skip executable name
-    _ = args.skip();
+    _ = args.skip(); // executable name
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--filter") or std.mem.eql(u8, arg, "-f")) {
@@ -431,15 +337,12 @@ pub fn parseArgs(allocator: std.mem.Allocator) !RunnerConfig {
         } else if (std.mem.eql(u8, arg, "--no-keep-going")) {
             config.keep_going = false;
         } else if (std.mem.eql(u8, arg, "--iterations")) {
-            if (args.next()) |n| {
-                config.iterations = std.fmt.parseInt(u32, n, 10) catch 1;
-            }
+            if (args.next()) |n| config.iterations = std.fmt.parseInt(u32, n, 10) catch 1;
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             printUsage();
             std.process.exit(0);
         }
     }
-
     return config;
 }
 
@@ -447,7 +350,7 @@ fn printUsage() void {
     std.debug.print(
         \\BLAZE Conformance Test Suite (BLAZE-CTS)
         \\
-        \\Usage: test-cts [OPTIONS]
+        \\Usage: blaze-cts [OPTIONS]
         \\
         \\Options:
         \\  -f, --filter <PATTERN>    Run only tests matching pattern
@@ -459,13 +362,6 @@ fn printUsage() void {
         \\  --no-keep-going           Stop on first failure
         \\  --iterations <N>          Run each test N times
         \\  -h, --help                Show this help message
-        \\
-        \\Examples:
-        \\  test-cts                          Run all tests
-        \\  test-cts --filter context         Run context tests only
-        \\  test-cts --filter CTX-001         Run specific test
-        \\  test-cts --generate-golden        Update golden images
-        \\  test-cts --junit-output results.xml
         \\
     , .{});
 }
