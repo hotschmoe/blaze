@@ -1,0 +1,25 @@
+# Zig build artifacts
+zig-out/
+zig-cache/
+.zig-cache/
+
+# Compiled shaders
+*.spv
+
+# Local development
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Debug
+*.pdb
+
+# Vulkan validation layers cache
+vk_layer_settings.txt
