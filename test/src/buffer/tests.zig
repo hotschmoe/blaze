@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const framework = @import("../framework.zig");
+const blaze = @import("blaze");
 
 pub const suite = framework.TestSuite{
     .name = "blaze.buffer",
@@ -32,131 +33,147 @@ pub const suite = framework.TestSuite{
     },
 };
 
-/// BUF-001: Create buffer with vertex usage.
 fn createVertexBuffer() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create buffer with vertex usage flag
-    // 2. Verify buffer is valid
-    // 3. Verify buffer size matches requested
-    // 4. Clean up
     return error.NotImplemented;
 }
 
-/// BUF-002: Create buffer with index usage.
 fn createIndexBuffer() framework.TestError!void {
-    // TODO: Implement
     return error.NotImplemented;
 }
 
-/// BUF-003: Create buffer with uniform usage.
 fn createUniformBuffer() framework.TestError!void {
-    // TODO: Implement
     return error.NotImplemented;
 }
 
 /// BUF-004: Create buffer with storage usage.
 fn createStorageBuffer() framework.TestError!void {
-    // TODO: Implement
-    return error.NotImplemented;
+    var ctx = blaze.Context.init(framework.getAllocator(), .{
+        .app_name = "CTS-BUF-004",
+        .validation = false,
+        .mode = .compute_only,
+    }) catch |err| {
+        framework.log("Context creation failed: {s}", .{@errorName(err)});
+        return error.DeviceError;
+    };
+    defer ctx.deinit();
+
+    var buffer = blaze.Buffer.init(&ctx, .{
+        .size = 1024,
+        .usage = .{ .storage = true },
+        .memory = .host_visible,
+    }) catch |err| {
+        framework.log("Buffer creation failed: {s}", .{@errorName(err)});
+        return error.BufferError;
+    };
+    defer buffer.deinit(&ctx);
+
+    try framework.expectEqual(u64, 1024, buffer.size);
+    framework.log("Created storage buffer of size {d}", .{buffer.size});
 }
 
-/// BUF-005: Create buffer with indirect usage.
 fn createIndirectBuffer() framework.TestError!void {
-    // TODO: Implement
     return error.NotImplemented;
 }
 
-/// BUF-006: Create buffer with multiple usage flags.
 fn createCombinedUsage() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create buffer with vertex | storage | transfer_src flags
-    // 2. Verify all usages work
-    // 3. Clean up
     return error.NotImplemented;
 }
 
-/// BUF-007: Create zero-size buffer should return error.
 fn createZeroSize() framework.TestError!void {
-    // TODO: Implement
-    // 1. Attempt to create buffer with size = 0
-    // 2. Verify appropriate error is returned
     return error.NotImplemented;
 }
 
-/// BUF-008: Create near-limit size buffer.
 fn createHugeBuffer() framework.TestError!void {
-    // TODO: Implement
-    // 1. Query device memory limits
-    // 2. Attempt to create buffer near maximum size
-    // 3. Handle out-of-memory gracefully
     return error.NotImplemented;
 }
 
 /// BUF-009: Map host-visible buffer and write directly.
 fn mapHostVisible() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create host-visible buffer
-    // 2. Map buffer
-    // 3. Write data through mapped pointer
-    // 4. Unmap buffer
-    // 5. Verify no errors
-    return error.NotImplemented;
+    var ctx = blaze.Context.init(framework.getAllocator(), .{
+        .app_name = "CTS-BUF-009",
+        .validation = false,
+        .mode = .compute_only,
+    }) catch |err| {
+        framework.log("Context creation failed: {s}", .{@errorName(err)});
+        return error.DeviceError;
+    };
+    defer ctx.deinit();
+
+    var buffer = blaze.Buffer.init(&ctx, .{
+        .size = 256,
+        .usage = .{ .storage = true },
+        .memory = .host_visible,
+    }) catch |err| {
+        framework.log("Buffer creation failed: {s}", .{@errorName(err)});
+        return error.BufferError;
+    };
+    defer buffer.deinit(&ctx);
+
+    const mapped = buffer.getMappedSlice() orelse {
+        framework.log("Buffer not mapped", .{});
+        return error.BufferError;
+    };
+
+    const test_data = "Hello, BLAZE!";
+    @memcpy(mapped[0..test_data.len], test_data);
+
+    framework.log("Successfully wrote {d} bytes to mapped buffer", .{test_data.len});
 }
 
 /// BUF-010: Write via map, then verify contents.
 fn mapWriteReadBack() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create host-visible buffer
-    // 2. Map and write known pattern
-    // 3. Unmap
-    // 4. Map again and read back
-    // 5. Verify data matches
-    return error.NotImplemented;
+    var ctx = blaze.Context.init(framework.getAllocator(), .{
+        .app_name = "CTS-BUF-010",
+        .validation = false,
+        .mode = .compute_only,
+    }) catch |err| {
+        framework.log("Context creation failed: {s}", .{@errorName(err)});
+        return error.DeviceError;
+    };
+    defer ctx.deinit();
+
+    var buffer = blaze.Buffer.init(&ctx, .{
+        .size = 256,
+        .usage = .{ .storage = true },
+        .memory = .host_visible,
+    }) catch |err| {
+        framework.log("Buffer creation failed: {s}", .{@errorName(err)});
+        return error.BufferError;
+    };
+    defer buffer.deinit(&ctx);
+
+    const test_pattern: [16]u8 = .{ 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
+
+    buffer.write(&test_pattern) catch {
+        return error.BufferError;
+    };
+
+    var read_back: [16]u8 = undefined;
+    buffer.read(&read_back) catch {
+        return error.BufferError;
+    };
+
+    try framework.expectEqualSlices(u8, &test_pattern, &read_back);
+
+    framework.log("Buffer write/read round-trip verified", .{});
 }
 
-/// BUF-011: Upload to device-local buffer via staging.
 fn uploadDeviceLocal() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create device-local buffer
-    // 2. Upload data via staging buffer
-    // 3. Verify no errors
     return error.NotImplemented;
 }
 
-/// BUF-012: Download from device-local buffer.
 fn downloadDeviceLocal() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create device-local buffer with known data
-    // 2. Download data to CPU
-    // 3. Verify data matches
     return error.NotImplemented;
 }
 
-/// BUF-013: Create and use buffer slice.
 fn bufferSlice() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create large buffer
-    // 2. Create slice referencing portion
-    // 3. Use slice in binding
-    // 4. Verify correct data accessed
     return error.NotImplemented;
 }
 
-/// BUF-014: Destroy buffer while mapped.
 fn destroyWhileMapped() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create and map buffer
-    // 2. Destroy buffer without explicit unmap
-    // 3. Verify clean shutdown
     return error.NotImplemented;
 }
 
-/// BUF-015: Destroy buffer while GPU is using it.
 fn destroyWhileInUse() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create buffer
-    // 2. Submit GPU work using buffer
-    // 3. Immediately destroy buffer
-    // 4. Verify deferred destruction works
     return error.NotImplemented;
 }

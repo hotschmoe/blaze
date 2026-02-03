@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const framework = @import("../framework.zig");
+const blaze = @import("blaze");
 
 pub const suite = framework.TestSuite{
     .name = "blaze.context",
@@ -30,114 +31,65 @@ pub const suite = framework.TestSuite{
 /// CTX-001: Create context with default configuration.
 /// Verifies that a context can be created with minimal/default settings.
 fn createDefault() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create context with default config
-    // 2. Verify context is valid
-    // 3. Verify no validation errors
-    // 4. Clean up
     return error.NotImplemented;
 }
 
 /// CTX-002: Create context with validation layers enabled.
 /// Verifies that validation layers can be enabled for debugging.
 fn createWithValidation() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create context with validation = true
-    // 2. Verify validation layers are active
-    // 3. Trigger a deliberate validation error
-    // 4. Verify error is reported
-    // 5. Clean up
     return error.NotImplemented;
 }
 
 /// CTX-003: Create headless compute-only context.
 /// Verifies that a context can be created without presentation support.
 fn createComputeOnly() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create context with compute_only = true
-    // 2. Verify compute queue is available
-    // 3. Verify no graphics/present queue required
-    // 4. Clean up
-    return error.NotImplemented;
+    var ctx = blaze.Context.init(framework.getAllocator(), .{
+        .app_name = "CTS-CTX-003",
+        .validation = false,
+        .mode = .compute_only,
+    }) catch |err| {
+        framework.log("Context creation failed: {s}", .{@errorName(err)});
+        return error.DeviceError;
+    };
+    defer ctx.deinit();
+
+    const name = ctx.getDeviceName();
+    try framework.expect(name.len > 0);
+
+    framework.log("Created compute-only context on: {s}", .{name});
 }
 
 /// CTX-004: Create context with specific Vulkan features requested.
-/// Verifies that specific GPU features can be requested.
 fn createWithFeatures() framework.TestError!void {
-    // TODO: Implement
-    // 1. Query available features
-    // 2. Request a subset of available features
-    // 3. Verify features are enabled
-    // 4. Clean up
     return error.NotImplemented;
 }
 
 /// CTX-005: Select GPU by name substring.
-/// Verifies that a specific GPU can be selected by name.
 fn createPreferredDevice() framework.TestError!void {
-    // TODO: Implement
-    // 1. Enumerate available devices
-    // 2. Create context preferring a specific device name
-    // 3. Verify selected device matches preference
-    // 4. Clean up
     return error.NotImplemented;
 }
 
 /// CTX-006: Request unavailable features.
-/// Verifies that requesting unavailable features returns an error.
 fn createMissingFeatures() framework.TestError!void {
-    // TODO: Implement
-    // 1. Attempt to create context with impossible features
-    // 2. Verify appropriate error is returned
-    // 3. Verify no crash or undefined behavior
     return error.NotImplemented;
 }
 
 /// CTX-007: Destroy context while GPU is busy.
-/// Verifies clean shutdown even with pending GPU work.
 fn destroyWithPendingWork() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create context
-    // 2. Submit long-running compute work
-    // 3. Immediately destroy context
-    // 4. Verify clean shutdown (no crash, no leak)
     return error.NotImplemented;
 }
 
 /// CTX-008: Create multiple contexts simultaneously.
-/// Verifies that multiple contexts can coexist.
 fn multipleContexts() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create first context
-    // 2. Create second context
-    // 3. Use both contexts independently
-    // 4. Destroy both contexts
-    // 5. Verify no resource conflicts
     return error.NotImplemented;
 }
 
 /// CTX-009: Query device information.
-/// Verifies that device name, limits, and features can be queried.
 fn contextDeviceInfo() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create context
-    // 2. Query device name
-    // 3. Query device limits (max texture size, etc.)
-    // 4. Query supported features
-    // 5. Verify reasonable values
-    // 6. Clean up
     return error.NotImplemented;
 }
 
 /// CTX-010: Query available VRAM.
-/// Verifies that memory budget information is available.
 fn contextMemoryBudget() framework.TestError!void {
-    // TODO: Implement
-    // 1. Create context
-    // 2. Query available VRAM
-    // 3. Verify non-zero value
-    // 4. Allocate some memory
-    // 5. Verify budget reflects allocation
-    // 6. Clean up
     return error.NotImplemented;
 }

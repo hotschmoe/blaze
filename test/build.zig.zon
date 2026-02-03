@@ -1,0 +1,16 @@
+.{
+    .name = .blaze_cts,
+    .version = "0.0.0",
+    .fingerprint = 0x9ed26f4a632ea80a,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{
+        .blaze = .{
+            .path = "..",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

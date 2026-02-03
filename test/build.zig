@@ -7,20 +7,15 @@
 
 const std = @import("std");
 
-pub fn addConformanceTests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
-    return b.addExecutable(.{
-        .name = "blaze-cts",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("test/src/runner.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-}
-
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const blaze_dep = b.dependency("blaze", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const blaze_mod = blaze_dep.module("blaze");
 
     const cts_exe = b.addExecutable(.{
         .name = "blaze-cts",
@@ -28,6 +23,9 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/runner.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "blaze", .module = blaze_mod },
+            },
         }),
     });
 

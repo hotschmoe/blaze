@@ -1,23 +1,40 @@
-//! By convention, root.zig is the root source file when making a library.
-const std = @import("std");
+//! BLAZE - Lean GPU Abstraction over Vulkan
+//!
+//! Zig-native GPU abstraction layer targeting Vulkan 1.3+ on Windows and Linux.
+//! Supports headless compute-only contexts for CI/batch processing.
 
-pub fn bufferedPrint() !void {
-    // Stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
-    const stdout = &stdout_writer.interface;
+// Internal modules
+const context_mod = @import("context.zig");
+const buffer_mod = @import("buffer.zig");
+const pipeline_mod = @import("pipeline.zig");
+const command_mod = @import("command.zig");
+const memory_mod = @import("memory.zig");
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+// Public API
 
-    try stdout.flush(); // Don't forget to flush!
-}
+pub const Context = context_mod.Context;
+pub const Config = context_mod.Config;
+pub const Mode = context_mod.Mode;
+pub const ContextError = context_mod.ContextError;
 
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
+pub const Buffer = buffer_mod.Buffer;
+pub const BufferDesc = buffer_mod.BufferDesc;
+pub const BufferUsage = buffer_mod.BufferUsage;
+pub const BufferError = buffer_mod.BufferError;
 
-test "basic add functionality" {
-    try std.testing.expect(add(3, 7) == 10);
+pub const ComputePipeline = pipeline_mod.ComputePipeline;
+pub const PipelineError = pipeline_mod.PipelineError;
+pub const updateDescriptorSet = pipeline_mod.updateDescriptorSet;
+
+pub const CommandBuffer = command_mod.CommandBuffer;
+pub const CommandError = command_mod.CommandError;
+
+pub const MemoryLocation = memory_mod.MemoryLocation;
+
+test "blaze module imports" {
+    _ = context_mod;
+    _ = buffer_mod;
+    _ = pipeline_mod;
+    _ = command_mod;
+    _ = memory_mod;
 }
