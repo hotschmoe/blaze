@@ -61,4 +61,17 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+
+    // SwiftShader download tool for CI/testing without GPU
+    const fetch_swiftshader = b.addExecutable(.{
+        .name = "fetch-swiftshader",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/fetch_swiftshader.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_fetch = b.addRunArtifact(fetch_swiftshader);
+    const fetch_step = b.step("fetch-swiftshader", "Download SwiftShader for software Vulkan rendering");
+    fetch_step.dependOn(&run_fetch.step);
 }
